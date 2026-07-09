@@ -2,7 +2,7 @@ pipeline {
     agent none // הבטחה שכל שלב יגדיר סוכן Docker משלו כנדרש
 
     environment {
-        AWS_ACCOUNT_ID     = '123456789012' // שנה ל-ID של חשבון ה-AWS שלך במידת הצורך
+        AWS_ACCOUNT_ID      = '123456789012' // שנה ל-ID של חשבון ה-AWS שלך במידת הצורך
         AWS_DEFAULT_REGION = 'us-east-1'
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
         IMAGE_NAME         = 'calculator-app'
@@ -30,8 +30,10 @@ pipeline {
                         }
                     }
                     steps {
-                        sh 'pip install -r requirements.txt'
-                        sh 'python -m unittest discover -s tests -v'
+                        dir('calculator-app-v2') {
+                            sh 'pip install -r requirements.txt'
+                            sh 'python -m unittest discover -s tests -v'
+                        }
                     }
                 }
                 stage('Push to ECR') {
@@ -46,10 +48,10 @@ pipeline {
         }
 
         // ==========================================
-        // חלק ד': תזרים CD - מופעל במיזוג ל-master
+        // חלק ד': תזרים CD - מופעל במיזוג ל-main
         // ==========================================
         stage('CD Flow') {
-            when { branch 'main' } // שים לב אם הענף הראשי אצלך הוא main או master ושנה בהתאם
+            when { branch 'main' } // מופעל רק בענף הראשי
             stages {
                 stage('Build Image (Prod)') {
                     agent { label 'built-in' }
@@ -65,8 +67,10 @@ pipeline {
                         }
                     }
                     steps {
-                        sh 'pip install -r requirements.txt'
-                        sh 'python -m unittest discover -s tests -v'
+                        dir('calculator-app-v2') {
+                            sh 'pip install -r requirements.txt'
+                            sh 'python -m unittest discover -s tests -v'
+                        }
                     }
                 }
                 stage('Push to ECR (Prod)') {
