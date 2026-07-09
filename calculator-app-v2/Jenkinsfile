@@ -1,12 +1,12 @@
 pipeline {
-    agent none 
+    agent none // הבטחה שכל שלב יגדיר סוכן Docker משלו כנדרש
 
     environment {
-        AWS_ACCOUNT_ID      = '992382545251' 
+        AWS_ACCOUNT_ID      = '992382545251' // ה-ID האמיתי של החשבון שלך
         AWS_DEFAULT_REGION = 'us-east-1'
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
         IMAGE_NAME         = 'calculator-app'
-        PROD_SERVER_IP     = 'YOUR_PROD_EC2_IP' 
+        PROD_SERVER_IP     = '3.86.214.188' // ה-IP האמיתי של שרת ה-Production שלך
     }
 
     stages {
@@ -14,10 +14,10 @@ pipeline {
         // חלק ג': תזרים CI - מופעל רק על Pull Requests
         // ==========================================
         stage('CI Flow') {
-            when { changeRequest() } 
+            when { changeRequest() } // מופעל רק ב-PR
             stages {
                 stage('Build Container Image') {
-                    agent { label 'built-in' } 
+                    agent { label 'built-in' } // משתמש במנוע השרת המארח לבנייה
                     steps {
                         sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
@@ -37,13 +37,7 @@ pipeline {
                     }
                 }
                 stage('Push to ECR') {
-                    agent {
-                        docker {
-                            image 'amazon/aws-cli'
-                            args '-v /var/run/docker.sock:/var/run/docker.sock --user root'
-                            reuseNode true
-                        }
-                    }
+                    agent { label 'built-in' } // שימוש בשרת המארח שמכיל גם Docker וגם AWS CLI
                     steps {
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
@@ -62,7 +56,7 @@ pipeline {
         // חלק ד': תזרים CD - מופעל במיזוג ל-main
         // ==========================================
         stage('CD Flow') {
-            when { branch 'main' } 
+            when { branch 'main' } // מופעל רק בענף הראשי
             stages {
                 stage('Build Image (Prod)') {
                     agent { label 'built-in' }
@@ -85,13 +79,7 @@ pipeline {
                     }
                 }
                 stage('Push to ECR (Prod)') {
-                    agent {
-                        docker {
-                            image 'amazon/aws-cli'
-                            args '-v /var/run/docker.sock:/var/run/docker.sock --user root'
-                            reuseNode true
-                        }
-                    }
+                    agent { label 'built-in' } // שימוש בשרת המארח שמכיל גם Docker וגם AWS CLI
                     steps {
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
@@ -124,6 +112,7 @@ pipeline {
                     agent { label 'built-in' }
                     steps {
                         script {
+                            // מנגנון ניסיונות חוזרים (Retries) כדי למנוע כשל אקראי בזמן עליית האפליקציה
                             def maxRetries = 3
                             def success = false
                             for(int i=0; i<maxRetries; i++) {
