@@ -1,0 +1,126 @@
+pipeline {
+    agent none // הבטחה שכל שלב יגדיר סוכן Docker משלו כנדרש
+
+    environment {
+        AWS_ACCOUNT_ID     = '123456789012' // שנה ל-ID של חשבון ה-AWS שלך במידת הצורך
+        AWS_DEFAULT_REGION = 'us-east-1'
+        ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+        IMAGE_NAME         = 'calculator-app'
+        PROD_SERVER_IP     = 'YOUR_PROD_EC2_IP' // שנה ל-IP של שרת ה-Production שלך
+    }
+
+    stages {
+        // ==========================================
+        // חלק ג': תזרים CI - מופעל רק על Pull Requests
+        // ==========================================
+        stage('CI Flow') {
+            when { changeRequest() } // מופעל רק ב-PR
+            stages {
+                stage('Build Container Image') {
+                    agent { label 'built-in' } // משתמש במנוע השרת המארח לבנייה
+                    steps {
+                        sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ."
+                    }
+                }
+                stage('Test') {
+                    agent {
+                        docker { 
+                            image 'python:3.11-slim'
+                            reuseNode true 
+                        }
+                    }
+                    steps {
+                        sh 'pip install -r requirements.txt'
+                        sh 'python -m unittest discover -s tests -v'
+                    }
+                }
+                stage('Push to ECR') {
+                    agent { label 'built-in' }
+                    steps {
+                        sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                        sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // חלק ד': תזרים CD - מופעל במיזוג ל-master
+        // ==========================================
+        stage('CD Flow') {
+            when { branch 'main' } // שים לב אם הענף הראשי אצלך הוא main או master ושנה בהתאם
+            stages {
+                stage('Build Image (Prod)') {
+                    agent { label 'built-in' }
+                    steps {
+                        sh "docker build -t ${IMAGE_NAME}:latest ."
+                    }
+                }
+                stage('Test (Prod)') {
+                    agent {
+                        docker { 
+                            image 'python:3.11-slim'
+                            reuseNode true 
+                        }
+                    }
+                    steps {
+                        sh 'pip install -r requirements.txt'
+                        sh 'python -m unittest discover -s tests -v'
+                    }
+                }
+                stage('Push to ECR (Prod)') {
+                    agent { label 'built-in' }
+                    steps {
+                        sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                        sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                    }
+                }
+                stage('Deploy to Production') {
+                    agent { label 'built-in' }
+                    steps {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
+                            script {
+                                def deployCmd = """
+                                    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
+                                    docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:latest && \
+                                    docker stop ${IMAGE_NAME} || true && \
+                                    docker rm ${IMAGE_NAME} || true && \
+                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:latest
+                                """
+                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'"
+                            }
+                        }
+                    }
+                }
+                stage('Health Verification') {
+                    agent { label 'built-in' }
+                    steps {
+                        script {
+                            // מנגנון ניסיונות חוזרים (Retries) כדי למנוע כשל אקראי
+                            def maxRetries = 3
+                            def success = false
+                            for(int i=0; i<maxRetries; i++) {
+                                try {
+                                    def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${PROD_SERVER_IP}/health", returnStdout: true).trim()
+                                    if(status == "200") {
+                                        success = true
+                                        echo "Application is Healthy!"
+                                        break
+                                    }
+                                } catch(Exception e) {
+                                    echo "Waiting for app to spin up..."
+                                }
+                                sleep(time: 10, unit: 'SECONDS')
+                            }
+                            if(!success) {
+                                error "Health check failed!"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
