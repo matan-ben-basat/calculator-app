@@ -41,17 +41,21 @@ pipeline {
                     agent {
                         docker {
                             image 'amazon/aws-cli:latest'
-                            // מיפוי מאובטח של ה-Docker Socket כדי שקונטיינר ה-AWS CLI יוכל לבצע דחופה
                             args '-v /var/run/docker.sock:/var/run/docker.sock'
                             reuseNode true
                         }
                     }
                     steps {
-                        script {
-                            // שימוש ב-Instance Role - ללא שום מפתחות קשיחים בקוד!
-                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                            sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
-                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                        // שימוש במזהים המדויקים שהגדרת הרגע במסך ה-Credentials בג'נקינס
+                        withCredentials([
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                        ]) {
+                            script {
+                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                            }
                         }
                     }
                 }
@@ -92,12 +96,18 @@ pipeline {
                         }
                     }
                     steps {
-                        script {
-                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                            sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
-                            sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
-                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                        // הזרקה מאובטחת של המפתחות גם בשלב ה-CD כדי למנוע כשל בלוגין
+                        withCredentials([
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                        ]) {
+                            script {
+                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                                sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                            }
                         }
                     }
                 }
