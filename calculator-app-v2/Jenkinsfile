@@ -1,12 +1,12 @@
 pipeline {
-    agent none // הבטחה שכל שלב יגדיר סוכן Docker משלו כנדרש
+    agent none 
 
     environment {
-        AWS_ACCOUNT_ID      = '123456789012' // שנה ל-ID של חשבון ה-AWS שלך במידת הצורך
+        AWS_ACCOUNT_ID      = '992382545251' 
         AWS_DEFAULT_REGION = 'us-east-1'
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
         IMAGE_NAME         = 'calculator-app'
-        PROD_SERVER_IP     = 'YOUR_PROD_EC2_IP' // שנה ל-IP של שרת ה-Production שלך
+        PROD_SERVER_IP     = 'YOUR_PROD_EC2_IP' 
     }
 
     stages {
@@ -14,10 +14,10 @@ pipeline {
         // חלק ג': תזרים CI - מופעל רק על Pull Requests
         // ==========================================
         stage('CI Flow') {
-            when { changeRequest() } // מופעל רק ב-PR
+            when { changeRequest() } 
             stages {
                 stage('Build Container Image') {
-                    agent { label 'built-in' } // משתמש במנוע השרת המארח לבנייה
+                    agent { label 'built-in' } 
                     steps {
                         sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
@@ -31,18 +31,28 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            // התקנה לתוך תיקייה מקומית ומעקיפת בעיית הרשאות ה-/.local
                             sh 'pip install --target=./packages -r requirements.txt'
                             sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
                         }
                     }
                 }
                 stage('Push to ECR') {
-                    agent { label 'built-in' }
+                    agent {
+                        docker {
+                            image 'amazon/aws-cli'
+                            args '-v /var/run/docker.sock:/var/run/docker.sock --user root'
+                            reuseNode true
+                        }
+                    }
                     steps {
-                        sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                        sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
-                        sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                        withCredentials([
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                        ]) {
+                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                            sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                        }
                     }
                 }
             }
@@ -52,7 +62,7 @@ pipeline {
         // חלק ד': תזרים CD - מופעל במיזוג ל-main
         // ==========================================
         stage('CD Flow') {
-            when { branch 'main' } // מופעל רק בענף הראשי
+            when { branch 'main' } 
             stages {
                 stage('Build Image (Prod)') {
                     agent { label 'built-in' }
@@ -69,18 +79,28 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            // התקנה לתוך תיקייה מקומית ומעקיפת בעיית הרשאות ה-/.local
                             sh 'pip install --target=./packages -r requirements.txt'
                             sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
                         }
                     }
                 }
                 stage('Push to ECR (Prod)') {
-                    agent { label 'built-in' }
+                    agent {
+                        docker {
+                            image 'amazon/aws-cli'
+                            args '-v /var/run/docker.sock:/var/run/docker.sock --user root'
+                            reuseNode true
+                        }
+                    }
                     steps {
-                        sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                        sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                        sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                        withCredentials([
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                        ]) {
+                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                            sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                        }
                     }
                 }
                 stage('Deploy to Production') {
@@ -104,7 +124,6 @@ pipeline {
                     agent { label 'built-in' }
                     steps {
                         script {
-                            // מנגנון ניסיונות חוזרים (Retries) כדי למנוע כשל אקראי
                             def maxRetries = 3
                             def success = false
                             for(int i=0; i<maxRetries; i++) {
