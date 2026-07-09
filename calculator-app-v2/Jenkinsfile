@@ -19,7 +19,7 @@ pipeline {
                 stage('Build Container Image') {
                     agent { label 'built-in' } // משתמש במנוע השרת המארח לבנייה
                     steps {
-                        sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ."
+                        sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
                 }
                 stage('Test') {
@@ -54,7 +54,7 @@ pipeline {
                 stage('Build Image (Prod)') {
                     agent { label 'built-in' }
                     steps {
-                        sh "docker build -t ${IMAGE_NAME}:latest ."
+                       sh "docker build -t ${IMAGE_NAME}:latest ./calculator-app-v2"
                     }
                 }
                 stage('Test (Prod)') {
