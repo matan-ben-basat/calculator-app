@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'built-in' } 
+    agent { label 'built-in' } // השרת המארח הראשי שבו ממופה ה-Docker Socket
 
     environment {
         AWS_ACCOUNT_ID     = '992382545251' 
@@ -10,19 +10,19 @@ pipeline {
     }
 
     stages {
-        // ==========================================
-        // חלק ג': תזרים CI - רץ רק על Pull Requests
-        // ==========================================
+        // ==========================================================
+        // 🛠️ חלק ג': תזרים CI - מופעל אוטומטית רק על בקשות Pull Requests
+        // ==========================================================
         stage('CI Flow - Pull Request') {
-            when { changeRequest() } // מזהה אוטומטית PR מה-Webhook
+            when { changeRequest() } // מזהה אוטומטית PR שנפתח או עודכן ב-GitHub
             stages {
-                stage('Build Image (PR)') {
+                stage('Build Container Image (CI)') {
                     steps {
-                        // בנייה אחת עם תיוג דטרמיניסטי מבוסס PR ו-Build
+                        // בנייה של תמונה עם תיוג דטרמיניסטי מבוסס מזהה PR ומספר בנייה
                         sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
                 }
-                stage('Test (PR)') {
+                stage('Test (CI)') {
                     agent {
                         docker { 
                             image 'python:3.11-slim'
@@ -31,15 +31,22 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
+                            // התקנת חבילות והרצת הבדיקות בתוך סוכן הדוקר הייעודי של פייתון
                             sh 'pip install --target=./packages -r requirements.txt'
                             sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
                         }
                     }
                 }
-                stage('Push to ECR (PR)') {
+                stage('Push Image to ECR (CI)') {
+                    agent {
+                        docker {
+                            image 'amazon/aws-cli:latest' // שימוש בסוכן דוקר עם AWS CLI מובנה כדי למנוע כשלים
+                            reuseNode true
+                        }
+                    }
                     steps {
                         script {
-                            // שימוש ב-Instance Role - אפס מפתחות גלויים בקוד!
+                            // שימוש ב-Instance Role של השרת - אפס מפתחות קשיחים בקוד!
                             sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                             sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
                             sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
@@ -49,18 +56,18 @@ pipeline {
             }
         }
 
-        // ==========================================
-        // חלק ד': תזרים CD - רץ רק במיזוג ל-master/main
-        // ==========================================
+        // ==========================================================
+        // 🚀 חלק ד': תזרים CD - מופעל אוטומטית במיזוג (Merge) לענף הראשי
+        // ==========================================================
         stage('CD Flow - Merge to Master') {
-            when { branch 'main' } // או 'master' בהתאם לבראנץ' הראשי שלך
+            when { branch 'main' } // מזהה דחיפה או מיזוג ישירות לענף הראשי
             stages {
-                stage('Build Image (Prod)') {
+                stage('Build Container Image (CD)') {
                     steps {
                        sh "docker build -t ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ./calculator-app-v2"
                     }
                 }
-                stage('Test (Prod)') {
+                stage('Test (CD)') {
                     agent {
                         docker { 
                             image 'python:3.11-slim'
@@ -74,10 +81,15 @@ pipeline {
                         }
                     }
                 }
-                stage('Push to ECR (Prod)') {
+                stage('Push to ECR (CD)') {
+                    agent {
+                        docker {
+                            image 'amazon/aws-cli:latest'
+                            reuseNode true
+                        }
+                    }
                     steps {
                         script {
-                            // גם פה - נשענים על ה-IAM Role של השרת!
                             sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                             sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
                             sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
@@ -86,8 +98,9 @@ pipeline {
                         }
                     }
                 }
-                stage('Deploy to Production') {
+                stage('Deploy to Production EC2') {
                     steps {
+                        // משיכת מפתח ה-SSH המוצפן מתוך ה-Credentials המאובטחים של ג'נקינס
                         withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
                             script {
                                 def deployCmd = """
@@ -105,23 +118,26 @@ pipeline {
                 stage('Health Verification') {
                     steps {
                         script {
-                            def maxRetries = 5 // הגדלתי ל-5 כדי שיהיה פחות רגיש לכשלים אקראיים (Non-flaky)
+                            def maxRetries = 5
                             def success = false
+                            echo "Starting Health Check Verification for ${PROD_SERVER_IP}..."
+                            
                             for(int i=0; i<maxRetries; i++) {
                                 try {
                                     def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${PROD_SERVER_IP}/health", returnStdout: true).trim()
                                     if(status == "200") {
                                         success = true
-                                        echo "Application is Healthy!"
+                                        echo "Application is Healthy and Live! (Received HTTP 200)"
                                         break
                                     }
                                 } catch(Exception e) {
-                                    echo "Waiting for app to spin up..."
+                                    echo "Attempt ${i+1} failed. Service might still be starting up..."
                                 }
-                                sleep(time: 10, unit: 'SECONDS')
+                                sleep(time: 10, unit: 'SECONDS') // השהייה של 10 שניות בין ניסיונות למניעת כשלים אקראיים
                             }
+                            
                             if(!success) {
-                                error "Health check failed!"
+                                error "Deployment failed: Health check timed out and returned non-200 status."
                             }
                         }
                     }
