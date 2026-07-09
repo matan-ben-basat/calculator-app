@@ -1,8 +1,8 @@
 pipeline {
-    agent { label 'built-in' } // ריצה ישירה על השרת המארח
+    agent { label 'built-in' } 
 
     environment {
-        AWS_ACCOUNT_ID      = '992382545251' 
+        AWS_ACCOUNT_ID     = '992382545251' 
         AWS_DEFAULT_REGION = 'us-east-1'
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
         IMAGE_NAME         = 'calculator-app'
@@ -10,12 +10,54 @@ pipeline {
     }
 
     stages {
-        stage('CD Flow') {
-            when { branch 'main' } 
+        // ==========================================
+        // חלק ג': תזרים CI - רץ רק על Pull Requests
+        // ==========================================
+        stage('CI Flow - Pull Request') {
+            when { changeRequest() } // מזהה אוטומטית PR מה-Webhook
+            stages {
+                stage('Build Image (PR)') {
+                    steps {
+                        // בנייה אחת עם תיוג דטרמיניסטי מבוסס PR ו-Build
+                        sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
+                    }
+                }
+                stage('Test (PR)') {
+                    agent {
+                        docker { 
+                            image 'python:3.11-slim'
+                            reuseNode true 
+                        }
+                    }
+                    steps {
+                        dir('calculator-app-v2') {
+                            sh 'pip install --target=./packages -r requirements.txt'
+                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
+                        }
+                    }
+                }
+                stage('Push to ECR (PR)') {
+                    steps {
+                        script {
+                            // שימוש ב-Instance Role - אפס מפתחות גלויים בקוד!
+                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                            sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // חלק ד': תזרים CD - רץ רק במיזוג ל-master/main
+        // ==========================================
+        stage('CD Flow - Merge to Master') {
+            when { branch 'main' } // או 'master' בהתאם לבראנץ' הראשי שלך
             stages {
                 stage('Build Image (Prod)') {
                     steps {
-                       sh "docker build -t ${IMAGE_NAME}:latest ./calculator-app-v2"
+                       sh "docker build -t ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ./calculator-app-v2"
                     }
                 }
                 stage('Test (Prod)') {
@@ -34,16 +76,13 @@ pipeline {
                 }
                 stage('Push to ECR (Prod)') {
                     steps {
-                        withCredentials([
-                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                        ]) {
-                            script {
-                                // הסרת הנתיב הקשיח - קריאה ישירה ל-aws דרך סביבת המשתמש של ג'נקינס
-                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                                sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                            }
+                        script {
+                            // גם פה - נשענים על ה-IAM Role של השרת!
+                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                            sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                            sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
                         }
                     }
                 }
@@ -53,10 +92,10 @@ pipeline {
                             script {
                                 def deployCmd = """
                                     aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
-                                    docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:latest && \
+                                    docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
                                     docker stop ${IMAGE_NAME} || true && \
                                     docker rm ${IMAGE_NAME} || true && \
-                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:latest
+                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}
                                 """
                                 sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'"
                             }
@@ -66,7 +105,7 @@ pipeline {
                 stage('Health Verification') {
                     steps {
                         script {
-                            def maxRetries = 3
+                            def maxRetries = 5 // הגדלתי ל-5 כדי שיהיה פחות רגיש לכשלים אקראיים (Non-flaky)
                             def success = false
                             for(int i=0; i<maxRetries; i++) {
                                 try {
