@@ -12,7 +12,7 @@ pipeline {
         ECR_REGISTRY   = "992382545251.dkr.ecr.us-east-1.amazonaws.com"
         ECR_REPO       = "calculator-app-matan"
         APP_DIR        = "calculator-app-v2"
-        PRODUCTION_IP  = "44.203.160.249" // יש לוודא החלפה ב-IP האמיתי של שרת הייצור
+        PRODUCTION_IP  = "44.203.160.249" // ה-IP המעודכן והתקין של שרת הייצור
     }
     
     stages {
@@ -26,11 +26,15 @@ pipeline {
         stage('Install System Tools & Deps') {
             steps {
                 echo 'Installing AWS CLI and Docker CLI inside agent...'
-                // התקנת הדרישות ישירות בתוך הקונטיינר כדי שכל הפקודות הבאות יעבדו חלק
                 sh '''
                     apt-get update && apt-get install -y curl unzip
+                    
+                    # ניקוי שאריות מבילדים קודמים כדי למנוע תקיעה של unzip
+                    rm -rf aws awscliv2.zip
+                    
                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                    unzip -q awscliv2.zip && ./aws/install
+                    # שימוש בדגל -o דורס קבצים אוטומטית ללא שאלות
+                    unzip -o -q awscliv2.zip && ./aws/install
                     
                     # התקנת ה-Docker CLI
                     curl -fsSL https://get.docker.com -o get-docker.sh
@@ -94,6 +98,7 @@ pipeline {
                     sh """
                         retry=0
                         max_retries=5
+                        # הוספת מגבלת זמן (Timeout) מונעת מהצינור לקפוא במקרה של עיכוב ברשת
                         until [ \$(curl --connect-timeout 5 --max-time 10 -s -o /dev/null -w "%{http_code}" http://${PRODUCTION_IP}:5000/health) -eq 200 ] || [ \$retry -eq \$max_retries ]; do
                             echo "Application is not ready yet. Retrying in 10 seconds... (Attempt \$((\$retry + 1))/\$max_retries)"
                             sleep 10
