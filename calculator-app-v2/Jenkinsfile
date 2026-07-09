@@ -31,8 +31,9 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            sh 'pip install -r requirements.txt'
-                            sh 'python -m unittest discover -s tests -v'
+                            // התקנה לתוך תיקייה מקומית ומעקיפת בעיית הרשאות ה-/.local
+                            sh 'pip install --target=./packages -r requirements.txt'
+                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
                         }
                     }
                 }
@@ -68,8 +69,9 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            sh 'pip install -r requirements.txt'
-                            sh 'python -m unittest discover -s tests -v'
+                            // התקנה לתוך תיקייה מקומית ומעקיפת בעיית הרשאות ה-/.local
+                            sh 'pip install --target=./packages -r requirements.txt'
+                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
                         }
                     }
                 }
