@@ -1,12 +1,12 @@
 pipeline {
-    agent none // הבטחה שכל שלב יגדיר סוכן משלו כנדרש
+    agent { label 'built-in' } // מאלץ את כל הצינור לרוץ ישירות על השרת המארח שיש לו את כל הכלים
 
     environment {
-        AWS_ACCOUNT_ID      = '992382545251' // ה-ID האמיתי של החשבון שלך
+        AWS_ACCOUNT_ID      = '992382545251' 
         AWS_DEFAULT_REGION = 'us-east-1'
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
         IMAGE_NAME         = 'calculator-app'
-        PROD_SERVER_IP     = '3.86.214.188' // ה-IP האמיתי של שרת ה-Production שלך
+        PROD_SERVER_IP     = '3.86.214.188' 
     }
 
     stages {
@@ -14,10 +14,9 @@ pipeline {
         // חלק ג': תזרים CI - מופעל רק על Pull Requests
         // ==========================================
         stage('CI Flow') {
-            when { changeRequest() } // מופעל רק ב-PR
+            when { changeRequest() } 
             stages {
                 stage('Build Container Image') {
-                    agent { label 'built-in' } // משתמש במנוע השרת המארח לבנייה
                     steps {
                         sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
@@ -37,13 +36,12 @@ pipeline {
                     }
                 }
                 stage('Push to ECR') {
-                    agent { label 'built-in' } // שימוש בשרת המארח שמכיל גם Docker וגם AWS CLI
                     steps {
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                         ]) {
-                            sh "/usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                             sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
                             sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
                         }
@@ -56,10 +54,9 @@ pipeline {
         // חלק ד': תזרים CD - מופעל במיזוג ל-main
         // ==========================================
         stage('CD Flow') {
-            when { branch 'main' } // מופעל רק בענף הראשי
+            when { branch 'main' } 
             stages {
                 stage('Build Image (Prod)') {
-                    agent { label 'built-in' }
                     steps {
                        sh "docker build -t ${IMAGE_NAME}:latest ./calculator-app-v2"
                     }
@@ -79,25 +76,23 @@ pipeline {
                     }
                 }
                 stage('Push to ECR (Prod)') {
-                    agent { label 'built-in' } // שימוש בשרת המארח שמכיל גם Docker וגם AWS CLI
                     steps {
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                         ]) {
-                            sh "/usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                            sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                             sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
                             sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
                         }
                     }
                 }
                 stage('Deploy to Production') {
-                    agent { label 'built-in' }
                     steps {
                         withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
                             script {
                                 def deployCmd = """
-                                    /usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
+                                    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
                                     docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:latest && \
                                     docker stop ${IMAGE_NAME} || true && \
                                     docker rm ${IMAGE_NAME} || true && \
@@ -109,7 +104,6 @@ pipeline {
                     }
                 }
                 stage('Health Verification') {
-                    agent { label 'built-in' }
                     steps {
                         script {
                             def maxRetries = 3
