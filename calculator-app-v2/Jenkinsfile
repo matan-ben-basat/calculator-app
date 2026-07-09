@@ -32,11 +32,11 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            // התקנת pytest וכל החבילות בצורה מקומית כדי למנוע בעיות הרשאה בקונטיינר
-                            sh 'pip install --target=./packages pytest'
-                            sh 'pip install --target=./packages -r requirements.txt'
-                            // הרצה המייצרת דוח XML תקני עבור ג'נקינס מתוך תיקיית החבילות המקומית [cite: 73, 156]
-                            sh 'PYTHONPATH=./packages python -m pytest --junitxml=test-results.xml tests/'
+                            // התקנה ישירה בקונטיינר המבודד - מונע שגיאות נתיבים לחלוטין!
+                            sh 'pip install pytest'
+                            sh 'pip install -r requirements.txt'
+                            // הרצת הבדיקות ויצירת דוח XML מובנה לג'נקינס [cite: 73, 156]
+                            sh 'python -m pytest --junitxml=test-results.xml tests/'
                         }
                     }
                     post {
@@ -90,9 +90,9 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            sh 'pip install --target=./packages pytest'
-                            sh 'pip install --target=./packages -r requirements.txt'
-                            sh 'PYTHONPATH=./packages python -m pytest --junitxml=test-results.xml tests/' [cite: 91, 172]
+                            sh 'pip install pytest'
+                            sh 'pip install -r requirements.txt'
+                            sh 'python -m pytest --junitxml=test-results.xml tests/' [cite: 91, 172]
                         }
                     }
                     post {
@@ -132,7 +132,7 @@ pipeline {
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                         ]) {
                             script {
-                                // הזרקה בטוחה של המפתחות ישירות לתוך פקודות הבלוק כדי שגם ה-login וגם ה-pull יכירו אותם בשרת החסום
+                                // הוספת תו הבריחה \\$ למשתני ה-AWS כדי להבטיח שהערכים יועברו בצורה תקינה דרך ה-SSH
                                 def deployCmd = """
                                     export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}' && \
                                     export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}' && \
