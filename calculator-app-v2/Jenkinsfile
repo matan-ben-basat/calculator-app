@@ -7,46 +7,47 @@ pipeline {
         AWS_DEFAULT_REGION = 'us-east-1'
         ECR_REGISTRY       = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
         IMAGE_NAME         = 'calculator-app'
-        PROD_SERVER_IP     = '100.53.73.171' // ה-IP המעודכן שלך
+        PROD_SERVER_IP     = '100.53.73.171' // ה-IP המעודכן שלך [cite: 9, 49]
     }
 
     stages {
         // ==========================================================
-        // חלק ג': תזרים CI עבור Pull Requests (מופעל אוטומטית ב-PR)
+        // חלק ג': תזרים CI עבור Pull Requests (מופעל אוטומטית ב-PR) [cite: 11, 113]
         // ==========================================================
         stage('CI Flow - Pull Request') {
-            when { changeRequest() } // שלב זה ירוץ אך ורק בעת פתיחת/עדכון PR ב-GitHub
+            when { changeRequest() } // שלב זה ירוץ אך ורק בעת פתיחת/עדכון PR ב-GitHub [cite: 34, 126]
             stages {
                 stage('Build Image (PR)') {
                     steps {
-                        // בנייה ותיוג דטרמיניסטי לפי דרישות ה-DoD של חלק ג'
+                        // בנייה ותיוג דטרמיניסטי לפי דרישות ה-DoD של חלק ג' [cite: 72, 156]
                         sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
                 }
                 stage('Test (PR)') {
                     agent {
                         docker { 
-                            image 'python:3.11-slim'
+                            image 'python:3.11-slim' [cite: 21, 118]
                             reuseNode true 
                         }
                     }
                     steps {
                         dir('calculator-app-v2') {
                             sh 'pip install --target=./packages -r requirements.txt'
-                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
+                            // יצירת קובץ תוצאות בפורמט XML עבור ג'נקינס [cite: 73, 156]
+                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v' 
                         }
                     }
                 }
                 stage('Push to ECR (PR)') {
                     agent {
                         docker {
-                            image 'amazon/aws-cli:latest'
-                            args '-v /var/run/docker.sock:/var/run/docker.sock'
+                            image 'amazon/aws-cli:latest' [cite: 21, 118]
+                            args '-v /var/run/docker.sock:/var/run/docker.sock' // מיפוי ה-Socket לצורך דחיפה [cite: 23, 119]
                             reuseNode true
                         }
                     }
                     steps {
-                        // שימוש במזהים המדויקים שהגדרת הרגע במסך ה-Credentials בג'נקינס
+                        // שימוש במזהים המדויקים שהגדרת במסך ה-Credentials בג'נקינס [cite: 25, 120]
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
@@ -54,7 +55,7 @@ pipeline {
                             script {
                                 sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                                 sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
-                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}" [cite: 77, 159]
                             }
                         }
                     }
@@ -63,40 +64,39 @@ pipeline {
         }
 
         // ==========================================================
-        // חלק ד': תזרים CD עבור Merge-to-Master (מופעל במיזוג ל-main)
+        // חלק ד': תזרים CD עבור Merge-to-Master (מופעל במיזוג ל-main) [cite: 12, 113]
         // ==========================================================
         stage('CD Flow - Merge to Master') {
-            when { branch 'main' } // ירוץ רק כאשר מתבצע מיזוג או דחיפה ישירה לענף הראשי
+            when { branch 'main' } // ירוץ רק כאשר מתבצע מיזוג או דחיפה ישירה לענף הראשי [cite: 34, 126]
             stages {
                 stage('Build Image (Prod)') {
                     steps {
-                       sh "docker build -t ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ./calculator-app-v2"
+                       sh "docker build -t ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ./calculator-app-v2" [cite: 90, 171]
                     }
                 }
                 stage('Test (Prod)') {
                     agent {
                         docker { 
-                            image 'python:3.11-slim'
+                            image 'python:3.11-slim' [cite: 21, 118]
                             reuseNode true 
                         }
                     }
                     steps {
                         dir('calculator-app-v2') {
                             sh 'pip install --target=./packages -r requirements.txt'
-                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v'
+                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v' [cite: 91, 172]
                         }
                     }
                 }
                 stage('Push to ECR (Prod)') {
                     agent {
                         docker {
-                            image 'amazon/aws-cli:latest'
-                            args '-v /var/run/docker.sock:/var/run/docker.sock'
+                            image 'amazon/aws-cli:latest' [cite: 21, 118]
+                            args '-v /var/run/docker.sock:/var/run/docker.sock' [cite: 23, 119]
                             reuseNode true
                         }
                     }
                     steps {
-                        // הזרקה מאובטחת של המפתחות גם בשלב ה-CD כדי למנוע כשל בלוגין
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
@@ -105,7 +105,7 @@ pipeline {
                                 sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                                 sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
                                 sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}" [cite: 92, 173]
                                 sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
                             }
                         }
@@ -113,10 +113,17 @@ pipeline {
                 }
                 stage('Deploy to Production') {
                     steps {
-                        // שימוש מאובטח ב-Credentials של ג'נקינס למניעת Hardcoded Secrets בקוד
-                        withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
+                        // משיכת מפתח ה-SSH והזרקה בו-זמנית של מפתחות ה-AWS כדי ששרת הפרודקשן יוכל להתחבר ל-ECR! 
+                        withCredentials([
+                            sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER'),
+                            string(credentialsId: 'aws-access-key-id', variable: 'PROD_AWS_KEY'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'PROD_AWS_SECRET')
+                        ]) {
                             script {
+                                // תיקון ה-Escaping באמצעות סלאש הפוך לפני סימני הדולר של משתני ה-AWS
                                 def deployCmd = """
+                                    export AWS_ACCESS_KEY_ID=\${PROD_AWS_KEY} && \
+                                    export AWS_SECRET_ACCESS_KEY=\${PROD_AWS_SECRET} && \
                                     aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
                                     docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
                                     docker stop ${IMAGE_NAME} || true && \
@@ -135,6 +142,7 @@ pipeline {
                             def success = false
                             for(int i=0; i<maxRetries; i++) {
                                 try {
+                                    // וידוא תקינות אל מול שרת הייצור [cite: 95, 176]
                                     def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${PROD_SERVER_IP}/health", returnStdout: true).trim()
                                     if(status == "200") {
                                         success = true
@@ -144,10 +152,10 @@ pipeline {
                                 } catch(Exception e) {
                                     echo "Waiting for app to spin up... (Attempt ${i+1}/${maxRetries})"
                                 }
-                                sleep(time: 10, unit: 'SECONDS')
+                                sleep(time: 10, unit: 'SECONDS') // מנגנון השהייה יציב (Non-flaky) [cite: 102, 180]
                             }
                             if(!success) {
-                                error "Health check failed! Production environment is unhealthy."
+                                error "Health check failed! Production environment is unhealthy." [cite: 97, 176]
                             }
                         }
                     }
