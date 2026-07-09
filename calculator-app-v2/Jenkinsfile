@@ -37,6 +37,12 @@ pipeline {
                             sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v' 
                         }
                     }
+                    post {
+                        always {
+                            // הצגת תוצאות הבדיקות בג'נקינס ושמירתן כארטיפקט לפי ה-DoD 
+                            junit allowEmptyResults: true, testResults: '**/test-results.xml'
+                        }
+                    }
                 }
                 stage('Push to ECR (PR)') {
                     agent {
@@ -87,6 +93,11 @@ pipeline {
                             sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v' [cite: 91, 172]
                         }
                     }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, testResults: '**/test-results.xml' [cite: 86, 166]
+                        }
+                    }
                 }
                 stage('Push to ECR (Prod)') {
                     agent {
@@ -113,24 +124,24 @@ pipeline {
                 }
                 stage('Deploy to Production') {
                     steps {
-                        // משיכת מפתח ה-SSH והזרקה בו-זמנית של מפתחות ה-AWS כדי ששרת הפרודקשן יוכל להתחבר ל-ECR! 
+                        // משיכת מפתח ה-SSH והזרקה בו-זמנית של מפתחות ה-AWS כדי ששרת הפרודקשן יוכל להתחבר ל-ECR! [cite: 25, 120]
                         withCredentials([
                             sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER'),
                             string(credentialsId: 'aws-access-key-id', variable: 'PROD_AWS_KEY'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'PROD_AWS_SECRET')
                         ]) {
                             script {
-                                // תיקון ה-Escaping באמצעות סלאש הפוך לפני סימני הדולר של משתני ה-AWS
+                                // המשתנים PROD_AWS_KEY ו-PROD_AWS_SECRET מוזרקים ישירות לתוך הפקודה ללא סלאש הפוך כדי שג'נקינס יתרגם אותם
                                 def deployCmd = """
-                                    export AWS_ACCESS_KEY_ID=\${PROD_AWS_KEY} && \
-                                    export AWS_SECRET_ACCESS_KEY=\${PROD_AWS_SECRET} && \
+                                    export AWS_ACCESS_KEY_ID='${PROD_AWS_KEY}' && \
+                                    export AWS_SECRET_ACCESS_KEY='${PROD_AWS_SECRET}' && \
                                     aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
                                     docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
                                     docker stop ${IMAGE_NAME} || true && \
                                     docker rm ${IMAGE_NAME} || true && \
-                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}
+                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} [cite: 94, 173, 174]
                                 """
-                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'"
+                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} \"${deployCmd}\""
                             }
                         }
                     }
