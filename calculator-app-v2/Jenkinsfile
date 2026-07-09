@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'built-in' } 
+    agent { label 'built-in' } // ריצה ישירה על השרת המארח
 
     environment {
         AWS_ACCOUNT_ID      = '992382545251' 
@@ -39,8 +39,8 @@ pipeline {
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                         ]) {
                             script {
-                                // תיקון מוחלט: שימוש בנתיב המלא המוחלט של השרת שלך
-                                sh "/usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                // הסרת הנתיב הקשיח - קריאה ישירה ל-aws דרך סביבת המשתמש של ג'נקינס
+                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                                 sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
                                 sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
                             }
@@ -52,7 +52,7 @@ pipeline {
                         withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
                             script {
                                 def deployCmd = """
-                                    /usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
+                                    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
                                     docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:latest && \
                                     docker stop ${IMAGE_NAME} || true && \
                                     docker rm ${IMAGE_NAME} || true && \
