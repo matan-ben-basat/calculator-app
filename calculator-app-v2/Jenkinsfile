@@ -1,5 +1,5 @@
 pipeline {
-    // הרצת שלבי המעטפת הכלליים על השרת המארח 
+    // הרצת שלבי המעטפת הכלליים על השרת המארח [cite: 21, 118]
     agent { label 'built-in' } 
 
     environment {
@@ -32,7 +32,6 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            // התקנה ישירה בקונטיינר המבודד - מונע שגיאות נתיבים לחלוטין!
                             sh 'pip install pytest'
                             sh 'pip install -r requirements.txt'
                             // הרצת הבדיקות ויצירת דוח XML מובנה לג'נקינס [cite: 73, 156]
@@ -41,7 +40,7 @@ pipeline {
                     }
                     post {
                         always {
-                            // שמירת תוצאות הבדיקות והצגתן בממשק ג'נקינס לפי ה-DoD [cite: 86, 166]
+                            // שמירת תוצאות הבדיקות והצגתן בממשק ג'נקינס לפי ה-DoD 
                             junit allowEmptyResults: true, testResults: '**/test-results.xml'
                         }
                     }
@@ -56,13 +55,16 @@ pipeline {
                     }
                     steps {
                         withCredentials([
-                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_KEY')
                         ]) {
                             script {
-                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                                sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
-                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}" [cite: 77, 159]
+                                // הזרקה נכונה של משתני הסביבה לקונטיינר ה-AWS CLI
+                                withEnv(["AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}", "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}"]) {
+                                    sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                    sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                                    sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}" [cite: 77, 159]
+                                }
                             }
                         }
                     }
@@ -111,15 +113,17 @@ pipeline {
                     }
                     steps {
                         withCredentials([
-                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_KEY')
                         ]) {
                             script {
-                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                                sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
-                                sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}" [cite: 92, 173]
-                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                                withEnv(["AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY}", "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY}"]) {
+                                    sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                    sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                                    sh "docker tag ${IMAGE_NAME}:candidate-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                                    sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}" [cite: 92, 173]
+                                    sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                                }
                             }
                         }
                     }
@@ -128,14 +132,14 @@ pipeline {
                     steps {
                         withCredentials([
                             sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER'),
-                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_KEY')
                         ]) {
                             script {
-                                // הוספת תו הבריחה \\$ למשתני ה-AWS כדי להבטיח שהערכים יועברו בצורה תקינה דרך ה-SSH
+                                // הוספת תו הבריחה \\$ למשתני ה-AWS כדי להבטיח שהערכים יועברו בצורה תקינה דרך ה-SSH לשרת היעד
                                 def deployCmd = """
-                                    export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}' && \
-                                    export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}' && \
+                                    export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY}' && \
+                                    export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_KEY}' && \
                                     aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
                                     docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
                                     docker stop ${IMAGE_NAME} || true && \
@@ -143,7 +147,7 @@ pipeline {
                                     docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}
                                 """
                                 
-                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'" [cite: 94, 173, 174]
+                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} \"${deployCmd}\"" [cite: 94, 173, 174]
                             }
                         }
                     }
