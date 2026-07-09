@@ -39,13 +39,15 @@ pipeline {
                 stage('Push to ECR') {
                     agent { label 'built-in' }
                     steps {
-                        withCredentials([
-                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                        ]) {
-                            sh "/usr/local/bin/aws ECR get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                            sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
-                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                        withEnv(["PATH+AWS=/usr/local/bin:/usr/bin:/bin"]) {
+                            withCredentials([
+                                string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                                string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                            ]) {
+                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                sh "docker tag ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER}"
+                            }
                         }
                     }
                 }
@@ -79,31 +81,36 @@ pipeline {
                     }
                 }
                 stage('Push to ECR (Prod)') {
-                    agent { label 'built-in' } // הוספת הגדרה מפורשת לשלב זה כדי שלא יתבלבל!
+                    agent { label 'built-in' }
                     steps {
-                        withCredentials([
-                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                        ]) {
-                            sh "/usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                            sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-                            sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                        // הזרקת ה-PATH המקומי בצורה מפורשת לשלב זה כדי שג'נקינס ימצא את ה-CLI
+                        withEnv(["PATH+AWS=/usr/local/bin:/usr/bin:/bin"]) {
+                            withCredentials([
+                                string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                                string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                            ]) {
+                                sh "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                                sh "docker tag ${IMAGE_NAME}:latest ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                                sh "docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+                            }
                         }
                     }
                 }
                 stage('Deploy to Production') {
                     agent { label 'built-in' }
                     steps {
-                        withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
-                            script {
-                                def deployCmd = """
-                                    /usr/local/bin/aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
-                                    docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:latest && \
-                                    docker stop ${IMAGE_NAME} || true && \
-                                    docker rm ${IMAGE_NAME} || true && \
-                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:latest
-                                """
-                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'"
+                        withEnv(["PATH+AWS=/usr/local/bin:/usr/bin:/bin"]) {
+                            withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER')]) {
+                                script {
+                                    def deployCmd = """
+                                        aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
+                                        docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:latest && \
+                                        docker stop ${IMAGE_NAME} || true && \
+                                        docker rm ${IMAGE_NAME} || true && \
+                                        docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:latest
+                                    """
+                                    sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'"
+                                }
                             }
                         }
                     }
