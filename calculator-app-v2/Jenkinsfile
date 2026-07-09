@@ -1,5 +1,5 @@
 pipeline {
-    // הגדרת ברירת מחדל לריצה על השרת המארח עבור שלבי הבראשית (כמו ה-Checkout)
+    // הרצת שלבי המעטפת הכלליים על השרת המארח [cite: 21, 118]
     agent { label 'built-in' } 
 
     environment {
@@ -12,14 +12,14 @@ pipeline {
 
     stages {
         // ==========================================================
-        // חלק ג': תזרים CI עבור Pull Requests (מופעל אוטומטית ב-PR) [cite: 11, 113]
+        // חלק ג': תזרים CI עבור Pull Requests [cite: 11, 113]
         // ==========================================================
         stage('CI Flow - Pull Request') {
-            when { changeRequest() } // שלב זה ירוץ אך ורק בעת פתיחת/עדכון PR ב-GitHub [cite: 34, 126]
+            when { changeRequest() } // ירוץ אוטומטית רק על בקשות מיזוג (PR) [cite: 34, 126]
             stages {
                 stage('Build Image (PR)') {
                     steps {
-                        // בנייה ותיוג דטרמיניסטי לפי דרישות ה-DoD של חלק ג' [cite: 72, 156]
+                        // בנייה אחת ותיוג דטרמיניסטי מבוסס PR ו-Build [cite: 72, 82, 156, 163]
                         sh "docker build -t ${IMAGE_NAME}:pr-${CHANGE_ID}-${BUILD_NUMBER} ./calculator-app-v2"
                     }
                 }
@@ -32,14 +32,16 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
+                            // התקנת pytest וחבילות האפליקציה בתוך קונטיינר הבידוד [cite: 21, 118]
+                            sh 'pip install pytest'
                             sh 'pip install --target=./packages -r requirements.txt'
-                            // יצירת קובץ תוצאות בפורמט XML עבור ג'נקינס [cite: 73, 156]
-                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v' 
+                            // הרצה המייצרת דוח XML תקני עבור ג'נקינס [cite: 73, 156]
+                            sh 'PYTHONPATH=./packages python -m pytest --junitxml=test-results.xml tests/'
                         }
                     }
                     post {
                         always {
-                            // הצגת תוצאות הבדיקות בג'נקינס ושמירתן כארטיפקט לפי ה-DoD 
+                            // שמירת תוצאות הבדיקות והצגתן בממשק ג'נקינס לפי ה-DoD 
                             junit allowEmptyResults: true, testResults: '**/test-results.xml'
                         }
                     }
@@ -48,12 +50,11 @@ pipeline {
                     agent {
                         docker {
                             image 'amazon/aws-cli:latest' [cite: 21, 118]
-                            args '-v /var/run/docker.sock:/var/run/docker.sock' // מיפוי ה-Socket לצורך דחיפה [cite: 23, 119]
+                            args '-v /var/run/docker.sock:/var/run/docker.sock' // מיפוי מאובטח של ה-Socket [cite: 23, 119]
                             reuseNode true
                         }
                     }
                     steps {
-                        // שימוש במזהים המדויקים שהגדרת במסך ה-Credentials בג'נקינס [cite: 25, 120]
                         withCredentials([
                             string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
@@ -70,10 +71,10 @@ pipeline {
         }
 
         // ==========================================================
-        // חלק ד': תזרים CD עבור Merge-to-Master (מופעל במיזוג ל-main) [cite: 12, 113]
+        // חלק ד': תזרים CD עבור Merge-to-Master [cite: 12, 113]
         // ==========================================================
         stage('CD Flow - Merge to Master') {
-            when { branch 'main' } // ירוץ רק כאשר מתבצע מיזוג או דחיפה ישירה לענף הראשי [cite: 34, 126]
+            when { branch 'main' } // מופעל אוטומטית במיזוג לענף הראשי [cite: 34, 126]
             stages {
                 stage('Build Image (Prod)') {
                     steps {
@@ -89,8 +90,9 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
+                            sh 'pip install pytest'
                             sh 'pip install --target=./packages -r requirements.txt'
-                            sh 'PYTHONPATH=./packages python -m unittest discover -s tests -v' [cite: 91, 172]
+                            sh 'PYTHONPATH=./packages python -m pytest --junitxml=test-results.xml tests/' [cite: 91, 172]
                         }
                     }
                     post {
@@ -124,24 +126,22 @@ pipeline {
                 }
                 stage('Deploy to Production') {
                     steps {
-                        // משיכת מפתח ה-SSH והזרקה בו-זמנית של מפתחות ה-AWS כדי ששרת הפרודקשן יוכל להתחבר ל-ECR! [cite: 25, 120]
                         withCredentials([
                             sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER'),
                             string(credentialsId: 'aws-access-key-id', variable: 'PROD_AWS_KEY'),
                             string(credentialsId: 'aws-secret-access-key', variable: 'PROD_AWS_SECRET')
                         ]) {
                             script {
-                                // המשתנים PROD_AWS_KEY ו-PROD_AWS_SECRET מוזרקים ישירות לתוך הפקודה ללא סלאש הפוך כדי שג'נקינס יתרגם אותם
-                                def deployCmd = """
-                                    export AWS_ACCESS_KEY_ID='${PROD_AWS_KEY}' && \
-                                    export AWS_SECRET_ACCESS_KEY='${PROD_AWS_SECRET}' && \
-                                    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
-                                    docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
-                                    docker stop ${IMAGE_NAME} || true && \
-                                    docker rm ${IMAGE_NAME} || true && \
-                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} [cite: 94, 173, 174]
-                                """
-                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} \"${deployCmd}\""
+                                // שימוש במרכאות בודדות פותר את בעיית ה-Escaping של משתני ה-SSH
+                                def deployCmd = "export AWS_ACCESS_KEY_ID='${PROD_AWS_KEY}' && " +
+                                                "export AWS_SECRET_ACCESS_KEY='${PROD_AWS_SECRET}' && " +
+                                                "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && " +
+                                                "docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && " +
+                                                "docker stop ${IMAGE_NAME} || true && " +
+                                                "docker rm ${IMAGE_NAME} || true && " +
+                                                "docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                                
+                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'" [cite: 94, 173, 174]
                             }
                         }
                     }
@@ -153,8 +153,7 @@ pipeline {
                             def success = false
                             for(int i=0; i<maxRetries; i++) {
                                 try {
-                                    // וידוא תקינות אל מול שרת הייצור [cite: 95, 176]
-                                    def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${PROD_SERVER_IP}/health", returnStdout: true).trim()
+                                    def status = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://${PROD_SERVER_IP}/health", returnStdout: true).trim() [cite: 95, 176]
                                     if(status == "200") {
                                         success = true
                                         echo "Application is Healthy!"
@@ -163,7 +162,7 @@ pipeline {
                                 } catch(Exception e) {
                                     echo "Waiting for app to spin up... (Attempt ${i+1}/${maxRetries})"
                                 }
-                                sleep(time: 10, unit: 'SECONDS') // מנגנון השהייה יציב (Non-flaky) [cite: 102, 180]
+                                sleep(time: 10, unit: 'SECONDS') // מנגנון השהייה יציב שאינו נוטה לכשלים [cite: 102, 180]
                             }
                             if(!success) {
                                 error "Health check failed! Production environment is unhealthy." [cite: 97, 176]
