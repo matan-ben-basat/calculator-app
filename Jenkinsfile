@@ -95,4 +95,35 @@ pipeline {
                     sh "docker push ${ECR_REGISTRY}/${ECR_REPO}:latest"
                     
                     echo "Deploying Automatically to Production EC2 via SSH..."
-                    withCredentials(
+                    withCredentials([sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY')]) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no -i ${IDENTITY_KEY} ubuntu@${PRODUCTION_IP} "
+                                aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                                docker pull ${ECR_REGISTRY}/${ECR_REPO}:latest
+                                docker rm -f calculator-prod || true
+                                docker run -d -p 5000:5000 --name calculator-prod --restart always ${ECR_REGISTRY}/${ECR_REPO}:latest
+                            "
+                        """
+                    }
+                    
+                    echo "Executing Health Verification Probe..."
+                    sh """
+                        retry=0
+                        max_retries=5
+                        until [ \$(curl --connect-timeout 5 --max-time 10 -s -o /dev/null -w "%{http_code}" http://${PRODUCTION_IP}:5000/health) -eq 200 ] || [ \$retry -eq \$max_retries ]; do
+                            echo "Application is not ready yet. Retrying in 10 seconds... (Attempt \$((\$retry + 1))/\$max_retries)"
+                            sleep 10
+                            retry=\$((\$retry + 1))
+                        done
+                        
+                        if [ \$retry -eq \$max_retries ]; then
+                            echo "ERROR: Health verification failed! Rolling back..."
+                            exit 1
+                        fi
+                        echo "Deployment successful! Service is healthy."
+                    """
+                }
+            }
+        }
+    }
+}
