@@ -13,15 +13,16 @@ pipeline {
         }
         stage('Install Dependencies') {
             steps {
-                echo 'Installing requirements...'
-                sh 'pip install -r requirements.txt'
+                echo 'Installing requirements from ZIP folder...'
+                // פקודת cd אומרת לו להיכנס לתיקיית ה-ZIP ושם להריץ את ה-pip
+                sh 'cd calculator-app-v2 && pip install -r requirements.txt'
             }
         }
         stage('Run Tests') {
             steps {
-                echo 'Running unit and integration tests...'
-                // פקודת הרצת הטסטים המדויקת מה-README של התרגיל!
-                sh 'python -m unittest discover -s tests -v'
+                echo 'Running tests inside ZIP folder...'
+                // נכנסים לתיקיית ה-ZIP ומריצים את הטסטים המקוריים שהמרצים שמו שם
+                sh 'cd calculator-app-v2 && python -m unittest discover -s tests -v'
             }
         }
     }
