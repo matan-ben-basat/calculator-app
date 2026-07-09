@@ -94,7 +94,7 @@ pipeline {
                     sh """
                         retry=0
                         max_retries=5
-                        until [ \$(curl -s -o /dev/null -w "%{http_code}" http://${PRODUCTION_IP}:5000/health) -eq 200 ] || [ \$retry -eq \$max_retries ]; do
+                        until [ \$(curl --connect-timeout 5 --max-time 10 -s -o /dev/null -w "%{http_code}" http://${PRODUCTION_IP}:5000/health) -eq 200 ] || [ \$retry -eq \$max_retries ]; do
                             echo "Application is not ready yet. Retrying in 10 seconds... (Attempt \$((\$retry + 1))/\$max_retries)"
                             sleep 10
                             retry=\$((\$retry + 1))
