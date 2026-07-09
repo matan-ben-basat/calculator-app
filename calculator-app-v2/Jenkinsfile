@@ -1,5 +1,5 @@
 pipeline {
-    // הרצת שלבי המעטפת הכלליים על השרת המארח [cite: 21, 118]
+    // הרצת שלבי המעטפת הכלליים על השרת המארח 
     agent { label 'built-in' } 
 
     environment {
@@ -32,16 +32,16 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            // התקנת pytest וחבילות האפליקציה בתוך קונטיינר הבידוד [cite: 21, 118]
-                            sh 'pip install pytest'
+                            // התקנת pytest וכל החבילות בצורה מקומית כדי למנוע בעיות הרשאה בקונטיינר
+                            sh 'pip install --target=./packages pytest'
                             sh 'pip install --target=./packages -r requirements.txt'
-                            // הרצה המייצרת דוח XML תקני עבור ג'נקינס [cite: 73, 156]
+                            // הרצה המייצרת דוח XML תקני עבור ג'נקינס מתוך תיקיית החבילות המקומית [cite: 73, 156]
                             sh 'PYTHONPATH=./packages python -m pytest --junitxml=test-results.xml tests/'
                         }
                     }
                     post {
                         always {
-                            // שמירת תוצאות הבדיקות והצגתן בממשק ג'נקינס לפי ה-DoD 
+                            // שמירת תוצאות הבדיקות והצגתן בממשק ג'נקינס לפי ה-DoD [cite: 86, 166]
                             junit allowEmptyResults: true, testResults: '**/test-results.xml'
                         }
                     }
@@ -90,7 +90,7 @@ pipeline {
                     }
                     steps {
                         dir('calculator-app-v2') {
-                            sh 'pip install pytest'
+                            sh 'pip install --target=./packages pytest'
                             sh 'pip install --target=./packages -r requirements.txt'
                             sh 'PYTHONPATH=./packages python -m pytest --junitxml=test-results.xml tests/' [cite: 91, 172]
                         }
@@ -132,8 +132,10 @@ pipeline {
                             string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                         ]) {
                             script {
-                                // כתיבת הפקודה ישירות כבלוק טקסט נקי בלי שירשורים ידניים, פותר את בעיית ה-Escaping לחלוטין
+                                // הזרקה בטוחה של המפתחות ישירות לתוך פקודות הבלוק כדי שגם ה-login וגם ה-pull יכירו אותם בשרת החסום
                                 def deployCmd = """
+                                    export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}' && \
+                                    export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}' && \
                                     aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
                                     docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
                                     docker stop ${IMAGE_NAME} || true && \
@@ -141,8 +143,7 @@ pipeline {
                                     docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}
                                 """
                                 
-                                // העברת משתני ה-AWS ישירות דרך פקודת ה-SSH בצורה מובנית ומאובטחת למניעת קריסה בשאל
-                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} ${deployCmd}'" [cite: 94, 173, 174]
+                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'" [cite: 94, 173, 174]
                             }
                         }
                     }
