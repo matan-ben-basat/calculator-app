@@ -2,7 +2,6 @@ pipeline {
     agent {
         docker { 
             image 'python:3.9-slim'
-            // מיפוי ה-Socket מאפשר לסוכן להשתמש במנוע ה-Docker של השרת לצורך בנייה ודחיפה
             args '-u root:root -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
@@ -13,7 +12,7 @@ pipeline {
         ECR_REGISTRY   = "992382545251.dkr.ecr.us-east-1.amazonaws.com"
         ECR_REPO       = "calculator-app-matan"
         APP_DIR        = "calculator-app-v2"
-        PRODUCTION_IP  = "44.203.160.249" // יש להחליף ב-IP של שרת הפרודקשן שלך
+        PRODUCTION_IP  = "44.203.160.249" // יש לוודא החלפה ב-IP האמיתי של שרת הייצור
     }
     
     stages {
@@ -24,8 +23,19 @@ pipeline {
             }
         }
         
-        stage('Install Dependencies') {
+        stage('Install System Tools & Deps') {
             steps {
+                echo 'Installing AWS CLI and Docker CLI inside agent...'
+                // התקנת הדרישות ישירות בתוך הקונטיינר כדי שכל הפקודות הבאות יעבדו חלק
+                sh '''
+                    apt-get update && apt-get install -y curl unzip
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip -q awscliv2.zip && ./aws/install
+                    
+                    # התקנת ה-Docker CLI
+                    curl -fsSL https://get.docker.com -o get-docker.sh
+                    sh get-docker.sh
+                '''
                 echo 'Installing requirements from ZIP folder...'
                 sh "cd ${APP_DIR} && pip install -r requirements.txt"
             }
@@ -39,18 +49,16 @@ pipeline {
             post {
                 success {
                     echo 'Archiving test results as artifacts...'
-                    // שמירת קובצי הבדיקות כתוצרי ריצה לפי דרישות ה-DoD
                     archiveArtifacts artifacts: "${APP_DIR}/tests/*.py", allowEmptyArchive: true
                 }
             }
         }
         
         stage('Build & Push to ECR (CI Flow)') {
-            when { changeRequest() } // שלב זה ירוץ אך ורק בתוך Pull Requests
+            when { changeRequest() }
             steps {
                 echo "CI Flow Triggered for PR #${env.CHANGE_ID}"
                 script {
-                    // הגדרת תג דטרמיניסטי לפי דרישות המבחן: pr-<id>-<build>
                     def prTag = "pr-${env.CHANGE_ID}-${env.BUILD_NUMBER}"
                     
                     echo "Logging into AWS ECR..."
@@ -66,7 +74,7 @@ pipeline {
         }
         
         stage('Deploy & Verify (CD Flow)') {
-            when { branch 'master' } // שלב זה ירוץ אך ורק במיזוג לענף master
+            when { branch 'master' }
             steps {
                 echo "CD Flow Triggered: Promoting candidate image to production"
                 script {
@@ -82,12 +90,7 @@ pipeline {
                     sh "docker push ${ECR_REGISTRY}/${ECR_REPO}:${releaseTag}"
                     sh "docker push ${ECR_REGISTRY}/${ECR_REPO}:latest"
                     
-                    echo "Deploying container to Production EC2 Host..."
-                    // פקודות הפריסה בשרת המרוחק (דוגמה באמצעות SSH או סקריפט מקומי במידה והשרת מארח גם את הפרודקשן)
-                    // יש לוודא מיפוי פורטים מתאים (-p 5000:5000) והרצה מחדש
-                    
                     echo "Executing Health Verification Probe..."
-                    // מנגנון בדיקת בריאות יציב עם Retries/Backoff (5 ניסיונות, השהיה של 10 שניות)
                     sh """
                         retry=0
                         max_retries=5
