@@ -128,20 +128,21 @@ pipeline {
                     steps {
                         withCredentials([
                             sshUserPrivateKey(credentialsId: 'prod-ec2-ssh-key', keyFileVariable: 'IDENTITY_KEY', usernameVariable: 'USER'),
-                            string(credentialsId: 'aws-access-key-id', variable: 'PROD_AWS_KEY'),
-                            string(credentialsId: 'aws-secret-access-key', variable: 'PROD_AWS_SECRET')
+                            string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                            string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
                         ]) {
                             script {
-                                // שימוש במרכאות בודדות פותר את בעיית ה-Escaping של משתני ה-SSH
-                                def deployCmd = "export AWS_ACCESS_KEY_ID='${PROD_AWS_KEY}' && " +
-                                                "export AWS_SECRET_ACCESS_KEY='${PROD_AWS_SECRET}' && " +
-                                                "aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && " +
-                                                "docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && " +
-                                                "docker stop ${IMAGE_NAME} || true && " +
-                                                "docker rm ${IMAGE_NAME} || true && " +
-                                                "docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}"
+                                // כתיבת הפקודה ישירות כבלוק טקסט נקי בלי שירשורים ידניים, פותר את בעיית ה-Escaping לחלוטין
+                                def deployCmd = """
+                                    aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY} && \
+                                    docker pull ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER} && \
+                                    docker stop ${IMAGE_NAME} || true && \
+                                    docker rm ${IMAGE_NAME} || true && \
+                                    docker run -d --name ${IMAGE_NAME} --restart always -p 80:5000 ${ECR_REGISTRY}/${IMAGE_NAME}:candidate-${BUILD_NUMBER}
+                                """
                                 
-                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} '${deployCmd}'" [cite: 94, 173, 174]
+                                // העברת משתני ה-AWS ישירות דרך פקודת ה-SSH בצורה מובנית ומאובטחת למניעת קריסה בשאל
+                                sh "ssh -o StrictHostKeyChecking=no -i \${IDENTITY_KEY} \${USER}@${PROD_SERVER_IP} 'AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} ${deployCmd}'" [cite: 94, 173, 174]
                             }
                         }
                     }
